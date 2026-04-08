@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Pro Tracker</title>
+    
+    <!-- ✅ PWA Meta Tags (Added) -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="theme-color" content="#0a84ff">
+
+    <style>
+        body { background-color: #000; color: #fff; font-family: -apple-system, sans-serif; display: flex; justify-content: center; padding: 20px; margin: 0; }
+        .app-container { width: 100%; max-width: 420px; }
+        h1 { color: #0a84ff; font-size: 24px; margin: 20px 0; }
+        .add-task-box { background: #1c1c1e; padding: 20px; border-radius: 15px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        input { background: #2c2c2e; border: none; padding: 12px; color: white; border-radius: 8px; outline: none; width: 100%; box-sizing: border-box; }
+        .time-inputs { display: flex; gap: 5px; margin: 10px 0; }
+        .time-inputs input { text-align: center; }
+        .add-btn { background: #30d158; color: black; border: none; padding: 14px; border-radius: 10px; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; }
+        .task-card { background: #1c1c1e; border-radius: 20px; padding: 18px; margin-bottom: 15px; display: flex; align-items: center; gap: 15px; border: 1px solid #2c2c2e; }
+        .play-btn { width: 55px; height: 55px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; border: none; font-size: 22px; flex-shrink: 0; background: #30d158; color: #000; }
+        .task-content { flex-grow: 1; overflow: hidden; }
+        
+        .header-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
+        .task-name { font-weight: bold; font-size: 18px; color: #30d158; }
+        .percent-badge { background: #30d158; color: #000; font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 4px; }
+        
+        .time-row { font-size: 17px; font-weight: bold; margin-bottom: 4px; font-family: monospace; }
+        .total-time { color: #8e8e93; font-weight: normal; font-size: 14px; }
+        
+        .history-row { font-size: 12px; color: #8e8e93; margin-bottom: 10px; cursor: pointer; display: inline-block; padding: 4px 8px; border-radius: 6px; background: rgba(255,255,255,0.05); transition: all 0.2s; }
+        .history-row:hover { background: rgba(255, 69, 58, 0.2); color: #ff453a; }
+
+        .progress-bg { height: 6px; background: #2c2c2e; border-radius: 3px; overflow: hidden; margin-bottom: 10px; }
+        .progress-fill { height: 100%; background: #30d158; transition: width 0.3s; }
+        
+        .action-row { display: flex; align-items: center; gap: 12px; }
+        .btn-link { background: none; border: none; cursor: pointer; font-size: 13px; padding: 0; font-weight: 500; }
+        .reset-btn { color: #0a84ff; }
+        .del-btn { color: #ff453a; }
+        .break-btn { color: #ffd60a; display: flex; align-items: center; gap: 4px; }
+
+        .break-status { font-size: 14px; color: #ffd60a; font-weight: bold; margin-top: 12px; background: rgba(255, 214, 10, 0.15); padding: 12px 15px; border-radius: 12px; display: flex; align-items: center; justify-content: space-between; border: 1px solid rgba(255, 214, 10, 0.3); }
+        .break-over { color: #ff453a; background: rgba(255, 69, 58, 0.15); border-color: rgba(255, 69, 58, 0.3); }
+        .brk-controls { display: flex; gap: 15px; align-items: center; }
+        .brk-action-btn { background: #ffd60a; border: none; cursor: pointer; font-size: 18px; width: 35px; height: 35px; border-radius: 50%; color: #000; display: flex; align-items: center; justify-content: center; }
+        .brk-close-btn { background: none; border: none; cursor: pointer; font-size: 20px; color: #8e8e93; padding: 5px; }
+    </style>
+</head>
+<body>
+<div class="app-container">
+    <h1>All projects ▾</h1>
+    <div class="add-task-box">
+        <input type="text" id="tName" placeholder="प्रोजेक्ट का नाम">
+        <div class="time-inputs">
+            <input type="number" id="tHrs" placeholder="HH" min="0">
+            <input type="number" id="tMin" placeholder="MM" min="0" max="59">
+            <input type="number" id="tSec" placeholder="SS" min="0" max="59">
+        </div>
+        <button class="add-btn" onclick="createNewTask()">+ Create Project</button>
+    </div>
+    <div id="projectList"></div>
+</div>
+
+<script>
+    // ✅ Service Worker Registration (Added)
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').then(() => console.log("App Ready!"));
+    }
+
+    let tasks = JSON.parse(localStorage.getItem('myTasks')) || {}; 
+    let activeIntervals = {};
+    let breakIntervals = {};
+
+    function saveToDisk() { localStorage.setItem('myTasks', JSON.stringify(tasks)); }
+
+    function resetBreakHistory(id) {
+        if(confirm(`क्या आप '${tasks[id].name}' की ब्रेक हिस्ट्री रिसेट करना चाहते हैं?`)) {
+            tasks[id].breakCount = 0;
+            tasks[id].totalBreakTime = 0;
+            saveToDisk();
+            renderTasks();
+        }
+    }
+
+    function renderTasks() {
+        const list = document.getElementById('projectList');
+        list.innerHTML = "";
+        for (let id in tasks) {
+            const t = tasks[id];
+            const h = Math.floor(t.elapsedSeconds / 3600);
+            const m = Math.floor((t.elapsedSeconds % 3600) / 60);
+            const s = t.elapsedSeconds % 60;
+            
+            const percent = t.totalSeconds > 0 ? Math.min(Math.floor((t.elapsedSeconds / t.totalSeconds) * 100), 100) : 0;
+            
+            let breakDisplay = "";
+            if(t.breakSeconds !== undefined) {
+                const isOver = t.breakSeconds < 0;
+                const absSec = Math.abs(t.breakSeconds);
+                const bm = Math.floor(absSec / 60);
+                const bs = absSec % 60;
+                const isRunning = !!breakIntervals[id];
+
+                breakDisplay = `
+                <div class="break-status ${isOver ? 'break-over' : ''}">
+                    <span>☕ Active Break: ${isOver ? '-' : ''}${bm}m ${bs}s</span>
+                    <div class="brk-controls">
+                        <button class="brk-action-btn" onclick="toggleBreak('${id}')" style="${isOver ? 'background:#ff453a' : ''}">${isRunning ? '⏸' : '▶'}</button>
+                        <button class="brk-close-btn" onclick="stopBreakManually('${id}')">✖</button>
+                    </div>
+                </div>`;
+            }
+
+            const card = document.createElement('div');
+            card.className = 'task-card';
+            card.innerHTML = `
+                <button class="play-btn" onclick="toggleTimer('${id}')">${activeIntervals[id] ? '⏸' : '▶'}</button>
+                <div class="task-content">
+                    <div class="header-row">
+                        <span class="task-name">${t.name}</span>
+                        <span class="percent-badge">${percent}% Completed</span>
+                    </div>
+                    
+                    <div class="time-row"><span>${h}h ${m}m ${s}s</span> <span class="total-time">/ ${Math.floor(t.totalSeconds/3600)}h ${Math.floor((t.totalSeconds%3600)/60)}m ${t.totalSeconds%60}s</span></div>
+                    
+                    <div class="history-row" title="Reset History" onclick="resetBreakHistory('${id}')">
+                        🔄 Breaks: ${t.breakCount || 0} | Total Break: ${Math.floor((t.totalBreakTime || 0) / 60)}m ${(t.totalBreakTime || 0) % 60}s
+                    </div>
+
+                    <div class="progress-bg"><div class="progress-fill" style="width:${percent}%"></div></div>
+                    
+                    <div class="action-row">
+                        <button class="btn-link reset-btn" onclick="resetTask('${id}')">Reset</button>
+                        <button class="btn-link del-btn" onclick="deleteTask('${id}')">Delete</button>
+                        <button class="btn-link break-btn" onclick="initBreak('${id}')">⏱️ Add Break</button>
+                    </div>
+                    ${breakDisplay}
+                </div>`;
+            list.appendChild(card);
+        }
+    }
+
+    function createNewTask() {
+        const name = document.getElementById('tName').value || "Unnamed Project";
+        const h = parseInt(document.getElementById('tHrs').value) || 0;
+        const m = parseInt(document.getElementById('tMin').value) || 0;
+        const s = parseInt(document.getElementById('tSec').value) || 0;
+        const total = (h * 3600) + (m * 60) + s;
+        if(total <= 0) return alert("समय तो डालिए!");
+
+        const id = 'task_' + Date.now();
+        tasks[id] = { name, totalSeconds: total, elapsedSeconds: 0, breakCount: 0, totalBreakTime: 0 };
+        saveToDisk(); renderTasks();
+        document.getElementById('tName').value = ''; 
+    }
+
+    function toggleTimer(id) {
+        if (activeIntervals[id]) {
+            clearInterval(activeIntervals[id]);
+            delete activeIntervals[id];
+        } else {
+            activeIntervals[id] = setInterval(() => {
+                tasks[id].elapsedSeconds++;
+                saveToDisk(); renderTasks();
+            }, 1000);
+        }
+        renderTasks();
+    }
+
+    function deleteTask(id) {
+        if(confirm("Delete?")) {
+            clearInterval(activeIntervals[id]);
+            delete tasks[id];
+            saveToDisk(); renderTasks();
+        }
+    }
+
+    renderTasks();
+</script>
+</body>
+</html>
